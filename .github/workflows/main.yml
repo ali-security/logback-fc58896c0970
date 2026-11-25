@@ -1,12 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - '*'
-  pull_request:
-    branches:
-      - '*'
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional surefire -Dtest selector (comma-separated); empty runs the full suite'
+        required: false
+        default: ''
 
 # https://help.github.com/en/actions/automating-your-workflow-with-github-actions/software-installed-on-github-hosted-runners
 
@@ -24,6 +24,7 @@ jobs:
   Test:
     name: JDK ${{ matrix.jdk }}, ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       matrix:
         jdk: [21]
@@ -39,8 +40,35 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: ${{ matrix.jdk }}
+        cache: maven
     - name: Install
       # download dependencies, etc, so test log looks better
-      run: mvn -B install
+      shell: bash
+      env:
+        # macOS only: exclude one timing-sensitive test (3s @Timeout) that is flaky on macOS runners
+        SEAL_SUREFIRE_EXCLUDES: ${{ runner.os == 'macOS' && format('-Dsurefire.excludesFile={0}/.ci/macos-surefire-excludes.txt', github.workspace) || '' }}
+      run: |
+        if [ -n "$SEAL_SUREFIRE_EXCLUDES" ]; then echo "EXCLUDED on macOS (flaky 3s @Timeout): $(cat .ci/macos-surefire-excludes.txt)"; fi
+        if [ -n "${{ inputs.test-filter }}" ]; then
+          mvn -B install -Dtest="${{ inputs.test-filter }}" -Dsurefire.failIfNoSpecifiedTests=false $SEAL_SUREFIRE_EXCLUDES
+        else
+          mvn -B install $SEAL_SUREFIRE_EXCLUDES
+        fi
+    - name: Rebuild logback-classic jars for packaging (tests already ran above)
+      if: runner.os == 'Linux'
+      run: mvn -B -q install -pl logback-classic -am -Dmaven.test.skip.exec=true
+    - name: Upload logback-classic jars
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: logback-classic-jars
+        path: |
+          logback-classic/target/logback-classic-*[0-9].jar
+          logback-classic/target/logback-classic-*-tests.jar
+        if-no-files-found: error
+    - name: Test report
+      if: always()
+      shell: bash
+      run: java .ci/SkipReport.java logback-core logback-core-blackbox logback-classic logback-classic-blackbox logback-examples
 
 

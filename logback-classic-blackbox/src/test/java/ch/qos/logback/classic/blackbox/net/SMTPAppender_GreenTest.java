@@ -96,6 +96,8 @@ public class SMTPAppender_GreenTest {
         } else {
             serverSetup = new ServerSetup(port, null, ServerSetup.PROTOCOL_SMTP);
         }
+        // allow the (SSL) server more than GreenMail's 2s default to start on slow CI hosts
+        serverSetup.setServerStartupTimeout(10000L);
         greenMailServer = new GreenMail(serverSetup);
         // user password is checked for the specified user ONLY
         greenMailServer.setUser(REQUIRED_USERNAME, REQUIRED_PASSWORD);
